@@ -143,20 +143,61 @@ export OLLAMA_MODEL="qwen2.5-coder:7b"
 
 ## API Reference
 
+### WorldQuant Brain Endpoints
+
+**Base URL:** `https://api.worldquantbrain.com`
+
+#### Authentication
+- `GET /authentication` - Validate session & get token expiry (200 OK or 204 No Content)
+- `GET /users/self` - Get current user info
+
+#### Data Discovery  
+- `GET /data-sets` - List available datasets (regions, universes, delays)
+- `GET /data-fields` - List available fields for dataset
+
+#### Alpha Simulation
+- `POST /simulations` - Submit alphas for backtesting (returns 202 Accepted)
+- `GET /simulations/{id}` - Poll for results (status: pending → completed)
+- `GET /simulations/{parent_id}/{child_id}` - Get child simulation results
+
+#### Alpha Management
+- `GET /alphas` - List submitted alphas
+- `GET /alphas/{id}` - Get specific alpha details
+
+**Full API documentation:** See `references/worldquant-api-endpoints.md`
+
 ### Internal Functions
 
 See `references/` for detailed documentation:
 - `alpha_generator.py` - Generate alphas via LLM
-- `simulator.py` - Submit to WorldQuant Brain
+- `simulator.py` - Submit to WorldQuant Brain (POST /simulations, poll results)
 - `tracker.py` - Persist and analyze results
 - `validator.py` - Check alpha syntax
 
-### WorldQuant Brain Endpoints Used
+### Key API Patterns
 
-- `GET /authentication` - Verify session
-- `POST /alpha` - Create alpha
-- `POST /alpha/{id}/simulate` - Run backtest
-- `GET /alpha/{id}` - Fetch results
+#### Simulation Workflow
+```
+1. POST /simulations with [alpha1, alpha2, ...] → 202 Accepted
+2. Extract simulation ID from response
+3. GET /simulations/{id} → status="pending"
+4. Poll GET /simulations/{id} every 2s (max 120 attempts)
+5. When status="completed", extract metrics:
+   - sharpe > 1.25 (constraint)
+   - turnover < 70% (constraint)
+   - fitness >= 1.0 (target)
+```
+
+#### Error Handling
+- `401 Unauthorized` → Reload session from cache, retry
+- `429 Too Many Requests` → Wait (Retry-After header), retry
+- `400 Bad Request` → Invalid alpha syntax, fix and retry
+- `500 Server Error` → Exponential backoff, retry
+
+#### Session Management
+- Cached in `brain_session_cache.json` (HTTP Basic Auth + cookies)
+- Expires: ~6 hours (Expert tier)
+- Auto-reload on 401 errors
 
 ## Troubleshooting
 
